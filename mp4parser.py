@@ -1,3 +1,4 @@
+import os
 import struct
 
 
@@ -555,21 +556,79 @@ class MP4(object):
                 frame_files.append(copied_frame)
 
         return frame_files
+    
+
+    def read_iframe_data(self, infile_path, outfile_path):
+
+        current_nal_pos  = 0
+        is_i_frame = False
+        file_stats = os.stat(infile_path)
+        frame_size = file_stats.st_size
+        with open(infile_path, "rb") as in_file:
+            while current_nal_pos < frame_size :
+                in_file.seek(current_nal_pos)
+
+                nal_length_byte_length = 0
+                nal_length_bytes = in_file.read(4)
+                if nal_length_bytes is None or len(nal_length_bytes) < 4:
+                    # nal not complete
+                    return None
+
+                nal_length_byte_length = 4
+                nal_length = struct.unpack('>I', nal_length_bytes)[0]
+                if nal_length == 1:
+                    nal_length_bytes = self.f.read(8)
+                    nal_length = int(struct.unpack('>Q', nal_length_bytes)[0])
+                    print('big atom', nal_length, nal_length_bytes)
+                    nal_length_byte_length += 8 
+
+                nal_unit_type_bytes = in_file.read(1)
+                if nal_unit_type_bytes is None:
+                    return None  # nal not complete
+                nal_unit_type = nal_unit_type_bytes[0] & 0x1f
+
+                first_byte_in_slice = in_file.read(1)
+                if first_byte_in_slice == None:
+                    return None
+
+                if nal_unit_type == 5:  # 5: idr frame is i frame
+                    print("idr frame")
+                    is_i_frame = True
+                    #break
+                elif nal_unit_type in [1, 2, 3, 4]:
+                    slice_type_byte = first_byte_in_slice[0] & 0b1111111
+                    slice_type = MP4.unary_decode(format(slice_type_byte, '07b'))
+                    print("nal_unit_type", nal_unit_type, 'slice type', slice_type)
+                    if slice_type in [2, 7]:
+                        print("i frame")
+                        is_i_frame = True
+                    else:
+                        print("other slide")
+                else: 
+                    print(f"other nal {nal_unit_type}")
+
+                current_nal_pos += nal_length + nal_length_byte_length
+
+
+        return None
 
 
 if __name__ == "__main__":
-    mp4 = MP4('C:/dev/video-byteformer/mp4_parser/data/aug_video1.mp4')
+    #mp4 = MP4('C:/dev/video-byteformer/mp4_parser/data/aug_video1.mp4')
 
-    mp4.parse()
-    mp4.traverse()
+    #mp4.parse()
+    #mp4.traverse()
 
-    frames = mp4.get_samples()
-    print('frames count:', len(frames))
+    #frames = mp4.get_samples()
+    #print('frames count:', len(frames))
 
-    mp4.write_i_frame('C:/dev/video-byteformer/mp4_parser/data/aug_video1.mp4',\
-                      frames,\
-                       'uid2',\
-                      'C:/dev/video-byteformer/mp4_parser/data/')
+    #mp4.write_i_frame('C:/dev/video-byteformer/mp4_parser/data/aug_video1.mp4',\
+    #                  frames,\
+    #                   'uid2',\
+    #                  'C:/dev/video-byteformer/mp4_parser/data/')
+    
+    mp4 = MP4('/home/ubuntu/data/h264_v20231107/h264/428a9041-ffa6-42d4-b2e0-b5df7f9c7978-999961.h264') 
+    mp4.read_iframe_data('/home/ubuntu/data/h264_v20231120/h264/428a9041-ffa6-42d4-b2e0-b5df7f9c7978-0.h264', None)
 
 
 
