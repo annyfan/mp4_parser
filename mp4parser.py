@@ -1,5 +1,5 @@
-import os
 import struct
+import os
 
 
 class NotMP4FormatException(Exception):
@@ -455,7 +455,6 @@ class MP4(object):
 
         return frames
 
-    # this method works only for some mp4, implementation of h264 is not complete
     def copy_iframe_data(self, frame, infile_path, outfile_path):
 
         current_nal_pos  = frame.pos
@@ -512,9 +511,8 @@ class MP4(object):
 
         if n == 0:
             return (1 << n) - 1
-        return (1 << n) - 1 + int(coding[-n + 1:], 2)
+        return (1 << n) - 1 + int(coding[n + 1:n+1+n], 2)
 
-    # this method works only for some mp4, implementation of h264 is not complete
 
     def write_i_frame(self, filename, frames, output_file_name, output_path):
         iframe_files = []
@@ -527,12 +525,17 @@ class MP4(object):
 
     @staticmethod
     def copy_frame_data(frame, infile_path, outfile_path):
+        return MP4.copy_data(frame.pos, frame.size, infile_path, outfile_path)
+
+ 
+    @staticmethod
+    def copy_data(pos, size, infile_path, outfile_path):
         buffer_size = 4096  # 4 KiB
 
         with open(infile_path, "rb") as in_file:
-            in_file.seek(frame.pos)
-            with open(outfile_path, "wb") as out_file:
-                toread_len = frame.size
+            in_file.seek(pos)
+            with open(outfile_path, "ab") as out_file:
+                toread_len = size
                 while toread_len > 0:
                     if toread_len < buffer_size:
                         chunk = in_file.read(toread_len)
@@ -545,21 +548,90 @@ class MP4(object):
                     out_file.write(chunk)
                     toread_len -= len(chunk)
 
-        return outfile_path
-
     @staticmethod
-    def write_frame(filename, frames, output_file_name, output_path):
+    def write_frame(filename, frames, output_file_paths):
         frame_files = []
         for idx, frame in enumerate(frames):
-            copied_frame = MP4.copy_frame_data(frame, filename, output_path + output_file_name[idx])
+            copied_frame = output_file_paths[idx]
+            MP4.copy_frame_data(frame, filename, copied_frame )
+            frame_files.append(copied_frame)
+
+        return frame_files
+    
+    @staticmethod
+    def write_vcl_nal_frame(filename, frames, output_file_paths):
+        frame_files = []
+        for idx, frame in enumerate(frames):
+            copied_frame = MP4.copy_vcl_nal(frame, filename, output_file_paths[idx])
             if copied_frame is not None:
                 frame_files.append(copied_frame)
 
         return frame_files
     
+    @staticmethod
+    def copy_vcl_nal( frame, infile_path, outfile_path):
+        current_nal_pos  = frame.pos
+        frame_size = frame.size
+        is_i_frame = False
+        i_frames = []
+        with open(infile_path, "rb") as in_file:
+            while current_nal_pos < frame.pos + frame_size :
+                in_file.seek(current_nal_pos)
 
-    def read_iframe_data(self, infile_path, outfile_path):
+                nal_length_byte_length = 0
+                nal_length_bytes = in_file.read(4)
+                if nal_length_bytes is None or len(nal_length_bytes) < 4:
+                    # nal not complete
+                    return None
 
+                nal_length_byte_length = 4
+                nal_length = struct.unpack('>I', nal_length_bytes)[0]
+                if nal_length == 1:
+                    nal_length_bytes = in_file.read(8)
+                    nal_length = int(struct.unpack('>Q', nal_length_bytes)[0])
+                    print('big atom', nal_length, nal_length_bytes)
+                    nal_length_byte_length += 8 
+
+                nal_unit_type_bytes = in_file.read(1)
+                if nal_unit_type_bytes is None:
+                    return None  # nal not complete
+                nal_unit_type = nal_unit_type_bytes[0] & 0x1f
+
+                first_byte_in_slice = in_file.read(1)
+                if first_byte_in_slice == None:
+                    return None
+
+                if nal_unit_type == 5:  # 5: idr frame is i frame
+                    #print("idr frame")
+                    is_i_frame = True
+                    #break
+                elif nal_unit_type in [1, 2, 3, 4]:
+                    slice_type_byte = first_byte_in_slice[0] & 0b1111111
+                    slice_type = MP4.unary_decode(format(slice_type_byte, '07b'))
+                    print("nal_unit_type", nal_unit_type, 'slice type', slice_type)
+                    if slice_type in [2, 7]:
+                        #print("i frame")
+                        is_i_frame = True
+                    #else:
+                        #print("other slide")
+                #else: 
+                    #print(f"other nal {nal_unit_type}")
+
+                if is_i_frame:
+                     i_frames.append((current_nal_pos,  nal_length + nal_length_byte_length))
+                    
+
+                current_nal_pos += nal_length + nal_length_byte_length
+
+        if len(i_frames)>0:
+            for (pos, size) in i_frames:
+                MP4.copy_data(pos, size, infile_path, outfile_path)
+
+
+        return outfile_path
+
+    def read_iframe_data(self, infile_path):
+ 
         current_nal_pos  = 0
         is_i_frame = False
         file_stats = os.stat(infile_path)
@@ -577,7 +649,7 @@ class MP4(object):
                 nal_length_byte_length = 4
                 nal_length = struct.unpack('>I', nal_length_bytes)[0]
                 if nal_length == 1:
-                    nal_length_bytes = self.f.read(8)
+                    nal_length_bytes = in_file.read(8)
                     nal_length = int(struct.unpack('>Q', nal_length_bytes)[0])
                     print('big atom', nal_length, nal_length_bytes)
                     nal_length_byte_length += 8 
@@ -606,7 +678,7 @@ class MP4(object):
                         print("other slide")
                 else: 
                     print(f"other nal {nal_unit_type}")
-
+                
                 current_nal_pos += nal_length + nal_length_byte_length
 
 
@@ -627,8 +699,25 @@ if __name__ == "__main__":
     #                   'uid2',\
     #                  'C:/dev/video-byteformer/mp4_parser/data/')
     
-    mp4 = MP4('/home/ubuntu/data/h264_v20231107/h264/428a9041-ffa6-42d4-b2e0-b5df7f9c7978-999961.h264') 
-    mp4.read_iframe_data('/home/ubuntu/data/h264_v20231120/h264/428a9041-ffa6-42d4-b2e0-b5df7f9c7978-0.h264', None)
+
+    mp4 = MP4('/data/h264_v20231123/h264_old/55ac670d-9a64-411c-8254-05238c62836f-1271230.h264') 
+    dirpath = '/data/h264_v20231123/h264_old/'
+
+
+    dirpath = os.path.expanduser(dirpath)
+    json_list = []
+    id_list = []
+    for filename in  os.listdir(dirpath):
+        fpath = os.path.join(dirpath, filename)
+        # print(path.encode('utf-8'))
+        if fpath.endswith('.h264'):
+            try:
+                #print(fpath)
+                mp4.read_iframe_data(fpath)
+            except OSError:
+                pass
+   
+    
 
 
 
