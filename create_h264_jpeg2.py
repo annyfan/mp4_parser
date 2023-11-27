@@ -8,7 +8,11 @@ import subprocess
 import csv
 import numpy as np
 
-
+# trace the h264
+#ffmpeg -i 1.h264 -c copy -bsf:v trace_headers -f null - 2> NALUS.txt
+# generate pic 
+#ffmpeg -framerate 25 -i 70f695c7-ff74-4ff8-b5be-064a0e221ad8-99994.h264 -frames:v 1 output.png
+#ffmpeg -debug mb_type -i 70f695c7-ff74-4ff8-b5be-064a0e221ad8-99994.h264
 
 path = '/data/h264_v20231121/20230114_ApexLegends_faide64x64.mp4'
 dirpath = '/data/h264_v20231123/'

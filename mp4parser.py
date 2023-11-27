@@ -498,7 +498,7 @@ class MP4(object):
                 current_nal_pos += nal_length + len(nal_length_bytes)
 
         if is_i_frame:
-            return self.copy_frame_data(frame, infile_path, outfile_path)
+            self.copy_frame_data(frame, infile_path, outfile_path)
 
         return None
 
@@ -577,7 +577,7 @@ class MP4(object):
         with open(infile_path, "rb") as in_file:
             while current_nal_pos < frame.pos + frame_size :
                 in_file.seek(current_nal_pos)
-
+                is_i_frame = False
                 nal_length_byte_length = 0
                 nal_length_bytes = in_file.read(4)
                 if nal_length_bytes is None or len(nal_length_bytes) < 4:
@@ -633,13 +633,11 @@ class MP4(object):
     def read_iframe_data(self, infile_path):
  
         current_nal_pos  = 0
-        is_i_frame = False
         file_stats = os.stat(infile_path)
         frame_size = file_stats.st_size
         with open(infile_path, "rb") as in_file:
             while current_nal_pos < frame_size :
                 in_file.seek(current_nal_pos)
-
                 nal_length_byte_length = 0
                 nal_length_bytes = in_file.read(4)
                 if nal_length_bytes is None or len(nal_length_bytes) < 4:
@@ -665,7 +663,6 @@ class MP4(object):
 
                 if nal_unit_type == 5:  # 5: idr frame is i frame
                     print("idr frame")
-                    is_i_frame = True
                     #break
                 elif nal_unit_type in [1, 2, 3, 4]:
                     slice_type_byte = first_byte_in_slice[0] & 0b1111111
@@ -673,7 +670,6 @@ class MP4(object):
                     print("nal_unit_type", nal_unit_type, 'slice type', slice_type)
                     if slice_type in [2, 7]:
                         print("i frame")
-                        is_i_frame = True
                     else:
                         print("other slide")
                 else: 
@@ -683,6 +679,74 @@ class MP4(object):
 
 
         return None
+        
+    @staticmethod
+    def convert_h264_data(infile_path, outfile_path):
+ 
+        file_stats = os.stat(infile_path)
+
+        file_size = file_stats.st_size
+   
+        is_i_frame = False
+        i_frames = []
+        framestart = []
+        last_three_bytes = b''
+        with open(infile_path, "rb") as in_file:
+            byte_read = in_file.read(1) 
+            while byte_read:
+                is_i_frame = False
+                last_three_bytes = (last_three_bytes + byte_read)[-3:]
+                if last_three_bytes == b'\x00\x00\x01':
+                    startpos = in_file.tell() - 3
+                    framestart.append(startpos)   
+                    
+                    nal_unit_type_bytes = in_file.read(1)
+            
+                    if nal_unit_type_bytes is None:
+                        return None  # nal not complete
+                    nal_unit_type = nal_unit_type_bytes[0] & 0x1f
+
+                    first_byte_in_slice = in_file.read(1)
+        
+                    if first_byte_in_slice == None:
+                        return None
+
+                    if nal_unit_type == 5:  # 5: idr frame is i frame
+                        #print("idr frame")
+                        is_i_frame = True
+                        #break
+                    elif nal_unit_type in [1, 2, 3, 4]:
+                        slice_type_byte = first_byte_in_slice[0] & 0b1111111
+                        slice_type = MP4.unary_decode(format(slice_type_byte, '07b'))
+                        print("nal_unit_type", nal_unit_type, 'slice type', slice_type)
+                        if slice_type in [2, 7]:
+                            #print("i frame")
+                            is_i_frame = True
+                        #else:
+                            #print("other slide")
+                    #else: 
+                        #print(f"other nal {nal_unit_type}")
+
+                    if is_i_frame:
+                        i_frames.append(startpos)
+                
+                byte_read = in_file.read(1) 
+                    
+
+                
+
+        if len(i_frames)>0:
+            for startpos in i_frames:
+                frameindex = framestart.index(startpos)
+                if frameindex >= len(framestart) - 1:
+                    end = file_size
+                else:
+                    end = framestart[framestart.index(startpos) + 1]
+                
+                MP4.copy_data(startpos, end - startpos, infile_path, outfile_path)
+
+
+        return outfile_path
 
 
 if __name__ == "__main__":
@@ -700,22 +764,25 @@ if __name__ == "__main__":
     #                  'C:/dev/video-byteformer/mp4_parser/data/')
     
 
-    mp4 = MP4('/data/h264_v20231123/h264_old/55ac670d-9a64-411c-8254-05238c62836f-1271230.h264') 
-    dirpath = '/data/h264_v20231123/h264_old/'
+    #mp4 = MP4('/data/h264_v20231123/h264_old/55ac670d-9a64-411c-8254-05238c62836f-1271230.h264') 
+    #dirpath = '/data/h264_v20231123/h264_old/'
 
 
-    dirpath = os.path.expanduser(dirpath)
-    json_list = []
-    id_list = []
-    for filename in  os.listdir(dirpath):
-        fpath = os.path.join(dirpath, filename)
-        # print(path.encode('utf-8'))
-        if fpath.endswith('.h264'):
-            try:
-                #print(fpath)
-                mp4.read_iframe_data(fpath)
-            except OSError:
-                pass
+    #dirpath = os.path.expanduser(dirpath)
+    #json_list = []
+    #id_list = []
+    #for filename in  os.listdir(dirpath):
+    #    fpath = os.path.join(dirpath, filename)
+    #    # print(path.encode('utf-8'))
+    #    if fpath.endswith('.h264'):
+    #        try:
+    #            #print(fpath)
+    #            mp4.read_iframe_data(fpath)
+    #        except OSError:
+    #            pass
+
+
+    MP4.convert_h264_data('/data/h264_v20231126/temp/643702f394763e3cd3a4e226_4.h264', '/data/h264_v20231126/h264/643702f394763e3cd3a4e226_4.h264')
    
     
 
